@@ -1,0 +1,17 @@
+(
+  device: (
+    orientation: Normal,
+    rows: 2,
+    cols: 3,
+    knobs: 1
+  ),
+  layers: [(
+    buttons: [
+      [(delay: 0, mapping: "f13"), (delay: 0, mapping: "f14"), (delay: 0, mapping: "f15")],
+      [(delay: 0, mapping: "f16"), (delay: 0, mapping: "f17"), (delay: 0, mapping: "f18")]
+    ],
+    knobs: [
+      (ccw: (delay: 0, mapping: "volumedown"), press: (delay: 0, mapping: "play"), cw: (delay: 0, mapping: "volumeup"))
+    ]
+  )]
+)
