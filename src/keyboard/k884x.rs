@@ -51,7 +51,7 @@ impl Configuration for Keyboard884x {
             // specific layer
             self.send(&self.read_config(device_info.num_keys, device_info.num_encoders, *layer))?;
             // read keys for specified layer
-            info!("reading keys for layer {}", layer);
+            info!("reading keys for layer {layer}");
             let data = self.read_config(device_info.num_keys, device_info.num_encoders, *layer);
             let _ = self.send(&data);
 
@@ -62,7 +62,7 @@ impl Configuration for Keyboard884x {
                     break;
                 }
                 debug!("bytes read: {bytes_read}");
-                debug!("data: {:02x?}", buf);
+                debug!("data: {buf:02x?}");
                 mappings.push(Decoder::get_key_mapping(&buf)?);
             }
         } else {
@@ -80,7 +80,7 @@ impl Configuration for Keyboard884x {
                         break;
                     }
                     debug!("bytes read: {bytes_read}");
-                    debug!("data: {:02x?}", buf);
+                    debug!("data: {buf:02x?}");
                     mappings.push(Decoder::get_key_mapping(&buf)?);
                 }
             }
@@ -93,7 +93,7 @@ impl Configuration for Keyboard884x {
         let mut knob_type = 0;
         let mut last_layer = 0;
         for km in mappings {
-            debug!("{:?}", km);
+            debug!("{km:?}");
             if km.layer != last_layer {
                 last_layer = km.layer;
                 knob_idx = 0;
@@ -113,7 +113,7 @@ impl Configuration for Keyboard884x {
                     km.keys.join(",");
             } else {
                 // knobs
-                debug!("knob idx: {} knob type: {}", knob_idx, knob_type);
+                debug!("knob idx: {knob_idx} knob type: {knob_type}");
                 match knob_type {
                     0 => {
                         mp.layers[(km.layer - 1) as usize].knobs[knob_idx].ccw.delay = km.delay;
@@ -193,7 +193,7 @@ impl Messages for Keyboard884x {
     fn program_led(&self, mode: u8, layer: u8, color: LedColor) -> Vec<u8> {
         let mut m_c = <LedColor as ToPrimitive>::to_u8(&color).unwrap();
         m_c |= mode;
-        debug!("mode and code: 0x{:02} layer: {layer}", m_c);
+        debug!("mode and code: 0x{m_c:02} layer: {layer}");
         let mut msg = vec![0x03, 0xfe, 0xb0, layer, 0x08];
         msg.extend_from_slice(&[0; 5]);
         msg.extend_from_slice(&[0x01, 0x00, m_c]);
@@ -372,6 +372,8 @@ impl Keyboard884x {
         let mut cnt = 0;
         let mut mouse_action = 0u8;
         let mut mouse_click = 0u8;
+        let mut media_key = false;
+        let mut media_val = 0u8;
         for binding in &keys {
             let kc: Vec<_> = binding.split('-').collect();
             let mut m_c = 0x00u8;
@@ -384,9 +386,15 @@ impl Keyboard884x {
                 } else if let Ok(w) = WellKnownCode::from_str(key) {
                     wkk = <WellKnownCode as ToPrimitive>::to_u8(&w).unwrap();
                 } else if let Ok(a) = MediaCode::from_str(key) {
-                    m_c = <MediaCode as ToPrimitive>::to_u8(&a).unwrap();
+                    let value = <MediaCode as ToPrimitive>::to_u16(&a).unwrap();
+                    m_c = (value & 0xFF) as u8;
                     msg[4] = 0x02;
-                    msg[10] = 0x02;
+                    msg[10] = ((value & 0xFF00) >> 8) as u8;
+                    media_val = msg[10];
+                    if msg[10] == 0 {
+                        msg[10] = 0x02;
+                    }
+                    media_key = true;
                 } else if let Ok(a) = MouseButton::from_str(key) {
                     mouse_click =
                         2u32.pow(<MouseButton as ToPrimitive>::to_u8(&a).unwrap().into()) as u8;
@@ -408,6 +416,10 @@ impl Keyboard884x {
             msg.extend_from_slice(&[0x00; 2]);
         }
 
+        if media_key {
+            msg[12] = media_val;
+        }
+
         if mouse_click > 0 {
             msg[12] = mouse_click;
         }
@@ -426,7 +438,7 @@ impl Keyboard884x {
         let mut col;
         let mut row;
 
-        if key_num % cols == 0 {
+        if key_num.is_multiple_of(cols) {
             row = key_num / cols;
             row = row.saturating_sub(1);
         } else {
@@ -500,6 +512,7 @@ mod tests {
         }
         assert_eq!(msg[10], 0x02, "checking byte 10");
         assert_eq!(msg[11], 0xea, "checking byte 11");
+        assert_eq!(msg[12], 0x00, "checking byte 12");
         Ok(())
     }
 
@@ -706,6 +719,38 @@ mod tests {
         }
         assert_eq!(msg[10], 0x01, "checking eleventh byte of programming led");
         assert_eq!(msg[12], 0x63, "checking mode and color of programming led");
+        Ok(())
+    }
+
+    #[test]
+    fn calculator() -> anyhow::Result<()> {
+        let kbd = Keyboard884x::new(None, 0, 0, 0x8842)?;
+        let msg = kbd.build_key_msg("calculator", 1u8, 1u8, 0)?;
+        println!("{:02x?}", msg);
+        assert_eq!(msg.len(), consts::PACKET_SIZE, "checking msg size");
+        assert_eq!(msg[4], 0x02, "checking byte 4");
+        for i in msg.iter().take(10).skip(5) {
+            assert_eq!(*i, 0x00);
+        }
+        assert_eq!(msg[10], 0x01, "checking byte 10");
+        assert_eq!(msg[11], 0x92, "checking byte 11");
+        assert_eq!(msg[12], 0x01, "checking byte 12");
+        Ok(())
+    }
+
+    #[test]
+    fn back() -> anyhow::Result<()> {
+        let kbd = Keyboard884x::new(None, 0, 0, 0x8842)?;
+        let msg = kbd.build_key_msg("webpageback", 1u8, 1u8, 0)?;
+        println!("{:02x?}", msg);
+        assert_eq!(msg.len(), consts::PACKET_SIZE, "checking msg size");
+        assert_eq!(msg[4], 0x02, "checking byte 4");
+        for i in msg.iter().take(10).skip(5) {
+            assert_eq!(*i, 0x00);
+        }
+        assert_eq!(msg[10], 0x02, "checking byte 10");
+        assert_eq!(msg[11], 0x24, "checking byte 11");
+        assert_eq!(msg[12], 0x02, "checking byte 12");
         Ok(())
     }
 }
